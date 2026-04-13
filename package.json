@@ -2,15 +2,15 @@
   "name": "genex-ai",
   "private": true,
   "version": "1.0.0",
-  "description": "GENEX AI - Autonomous Intelligent System",
-  "main": "electron/main.js",
-  "author": "Abdullah Ayash",
+  "main": "electron/main.cjs",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:8080 && electron .\""
+    "electron:dev": "concurrently \"npm run dev\" \"npm run electron:start\"",
+    "electron:start": "wait-on http://localhost:8080 && electron ."
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -20,7 +20,6 @@
     "@vitejs/plugin-react": "^4.2.0",
     "concurrently": "^8.2.0",
     "electron": "^30.0.0",
-    "typescript": "^5.2.2",
     "vite": "^5.0.0",
     "wait-on": "^7.0.1"
   }

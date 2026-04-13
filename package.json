@@ -2,25 +2,46 @@
   "name": "genex-ai",
   "private": true,
   "version": "1.0.0",
+  "description": "GENEX AI - Autonomous Intelligent System",
   "main": "electron/main.cjs",
+  "author": "Abdullah Ayash",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "electron:dev": "concurrently \"npm run dev\" \"npm run electron:start\"",
-    "electron:start": "wait-on http://localhost:8080 && electron ."
+    "electron:dev": "concurrently -k \"npm:dev\" \"npm:electron:start\"",
+    "electron:start": "wait-on http://localhost:8080 && electron .",
+    "electron:pack": "npm run build && electron-builder"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "dotenv": "^16.4.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.0",
-    "concurrently": "^8.2.0",
-    "electron": "^30.0.0",
-    "vite": "^5.0.0",
-    "wait-on": "^7.0.1"
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^30.5.1",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.1",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.genex.ai",
+    "productName": "GENEX AI",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    }
   }
 }

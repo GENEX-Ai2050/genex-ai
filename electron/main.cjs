@@ -58,7 +58,7 @@ ipcMain.handle('genex:create-realtime-session', async (_event, payload) => {
 
     const instructions = payload?.instructions || 'You are GENEX AI.';
     const model = payload?.model || 'gpt-realtime';
-    const voice = payload?.voice || 'marin';
+    const voice = payload?.voice || 'cedar';
 
     const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
       method: 'POST',

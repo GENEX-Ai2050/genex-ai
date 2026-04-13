@@ -448,7 +448,7 @@ export default function App() {
               opacity: 0.95,
             }}
           >
-            G E N E X AI Voice Core
+            TEST GENEX WORKING
           </p>
 
           <div style={entityStyle}>

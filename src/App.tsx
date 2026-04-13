@@ -45,6 +45,7 @@ export default function App() {
 أنت G E N E X AI، الذكاء الرسمي لشركة G E N E X.
 لغة البدء الافتراضية العربية.
 أجب باحترافية وفخامة وهدوء.
+اسم الشركة يُنطق دائمًا ككلمة واحدة "جينكس" وليس حرفيًا.
 اسم العلامة يجب دائمًا أن يكتب هكذا: G E N E X
 
 قاعدة هوية ثابتة:
@@ -120,12 +121,13 @@ export default function App() {
       };
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    channelCount: 1
+  }
+});
 
       localStreamRef.current = stream;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -284,11 +286,22 @@ export default function App() {
   };
 
   useEffect(() => {
-    return () => {
-      disconnectVoice();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const autoStart = async () => {
+    // نحدد المستخدم كعميل افتراضي
+    setRole("client");
+
+    // تأخير بسيط عشان الواجهة تجهز
+    setTimeout(() => {
+      connectVoice();
+    }, 1200);
+  };
+
+  autoStart();
+
+  return () => {
+    disconnectVoice();
+  };
+}, []);
 
   const buttonStyle: React.CSSProperties = {
     background: "#111827",

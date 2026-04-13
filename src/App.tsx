@@ -279,11 +279,13 @@ export default function App() {
     );
 
     dc.send(
-      JSON.stringify({
-        type: "response.create"
-      })
-    );
-  };
+  JSON.stringify({
+    type: "response.create",
+    response: {
+      modalities: ["audio", "text"]
+    }
+  })
+);
 
   useEffect(() => {
   const autoStart = async () => {

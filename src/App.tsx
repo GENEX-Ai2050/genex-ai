@@ -23,44 +23,52 @@ declare global {
 
 type UserRole = "client" | "employee" | "investor" | null;
 
-const FOUNDER_IMAGE_URL =
-  ""; // لاحقًا إذا رغبت ضع هنا رابط صورة المؤسس أو انقله إلى متغير بيئة منفصل
+const FOUNDER_IMAGE_URL = "";
 
 export default function App() {
   const [role, setRole] = useState<UserRole>(null);
-  const [status, setStatus] = useState("غير متصل");
+  const [status, setStatus] = useState("جاري تهيئة G E N E X AI...");
   const [connected, setConnected] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [messages, setMessages] = useState<string[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [hasAutoStarted, setHasAutoStarted] = useState(false);
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const pushLog = (text: string) => {
+    setLogs((prev) => [text, ...prev].slice(0, 30));
+  };
+
   const systemInstructions = useMemo(() => {
     const base = `
 أنت G E N E X AI، الذكاء الرسمي لشركة G E N E X.
 لغة البدء الافتراضية العربية.
-أجب باحترافية وفخامة وهدوء.
-اسم الشركة يُنطق دائمًا ككلمة واحدة "جينكس" وليس حرفيًا.
-اسم العلامة يجب دائمًا أن يكتب هكذا: G E N E X
+أجب باحترافية، ثقة، هدوء، وفخامة.
+اسم العلامة يجب أن يُكتب دائمًا هكذا: G E N E X
+لكن يُنطق صوتيًا دائمًا ككلمة واحدة: جينكس
+ولا تنطق الحروف بشكل منفصل أبدًا.
+
+ابدأ الحديث بالعربية افتراضيًا.
+كن طبيعيًا وموجزًا وصوتيًا.
+إذا بدأت الجلسة فابدأ بترحيب واضح ومباشر.
 
 قاعدة هوية ثابتة:
 إذا سأل المستخدم: من صنعك؟ أو من هو صانعك؟ أو من أنشأك؟
 فيجب أن تجيب بصياغة مثيرة وفخمة وبنفس المعنى:
 "تم ابتكاري على يد عبدالله عياش، المؤسس والرئيس التنفيذي لشركة G E N E X Era للأتمتة الذكية المستقلة."
-وبعدها اطلب عرض صورة المؤسس إذا كانت متوفرة.
+وبعدها اقترح عرض صورة المؤسس إذا كانت متوفرة.
 
 قواعد الدور:
-- العميل: ركز على الخدمات، الطلبات، والدعم.
+- العميل: ركز على الخدمات، الطلبات، الدعم، وحلول الأتمتة.
 - الموظف: اطلب الرقم الوظيفي أولًا ثم انتقل للدعم الداخلي.
 - المستثمر: تحدث بأسلوب تنفيذي عن الرؤية والنمو والفرص.
 
-تحدث بالعربية أولًا افتراضيًا، ويمكنك دعم الإنجليزية عند الطلب.
-كن موجزًا، طبيعيًا، وصوتيًا.
+إذا كان المستخدم موظفًا ولم يقدم الرقم الوظيفي، فلا تدخل في أي معلومات داخلية قبل طلبه.
 `;
 
     if (role === "client") {
@@ -68,66 +76,136 @@ export default function App() {
     }
 
     if (role === "employee") {
-      return `${base}\nالمستخدم الحالي: موظف لدى G E N E X. لا تكمل أي تفاصيل داخلية قبل التأكد من الرقم الوظيفي.`;
+      return `${base}\nالمستخدم الحالي: موظف لدى G E N E X. اطلب الرقم الوظيفي قبل المتابعة.`;
     }
 
     if (role === "investor") {
       return `${base}\nالمستخدم الحالي: مستثمر مهتم بـ G E N E X.`;
     }
 
-    return base;
+    return `${base}\nإذا لم يكن الدور محددًا بعد، اسأل المستخدم أولًا: هل أنت عميل أم موظف أم مستثمر؟`;
   }, [role]);
 
-  const pushLog = (text: string) => {
-    setLogs((prev) => [text, ...prev].slice(0, 20));
+  const disconnectVoice = () => {
+    try {
+      dataChannelRef.current?.close();
+      dataChannelRef.current = null;
+
+      peerRef.current?.getSenders().forEach((sender) => {
+        sender.track?.stop();
+      });
+
+      peerRef.current?.close();
+      peerRef.current = null;
+
+      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.pause();
+        remoteAudioRef.current.srcObject = null;
+        remoteAudioRef.current = null;
+      }
+
+      setConnected(false);
+      pushLog("تم إغلاق الجلسة الصوتية.");
+    } catch (error: any) {
+      pushLog(error?.message || "حدث خطأ أثناء إنهاء الجلسة.");
+    }
   };
 
-  const connectVoice = async () => {
+  const sendTextMessage = (text: string) => {
+    const dc = dataChannelRef.current;
+    if (!dc || dc.readyState !== "open") {
+      pushLog("قناة البيانات غير جاهزة بعد.");
+      return;
+    }
+
+    dc.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text,
+            },
+          ],
+        },
+      })
+    );
+
+    dc.send(
+      JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["audio", "text"],
+        },
+      })
+    );
+  };
+
+  const connectVoice = async (selectedRole?: UserRole) => {
     try {
+      const activeRole = selectedRole || role;
+
+      if (activeRole === "employee" && !employeeId.trim()) {
+        setStatus("يجب إدخال الرقم الوظيفي أولًا.");
+        pushLog("لم يتم بدء الجلسة لأن الرقم الوظيفي غير موجود.");
+        return;
+      }
+
       if (!window.genexDesktop?.createRealtimeSession) {
-        pushLog("طبقة سطح المكتب غير متاحة.");
+        setStatus("طبقة سطح المكتب غير متاحة.");
+        pushLog("genexDesktop.createRealtimeSession غير متوفر.");
+        return;
+      }
+
+      if (connected || isConnecting) {
         return;
       }
 
       setIsConnecting(true);
       setStatus("جاري إنشاء جلسة صوتية...");
-      pushLog("طلب إنشاء جلسة Realtime...");
+      pushLog("بدء إنشاء جلسة Realtime...");
 
       const session = await window.genexDesktop.createRealtimeSession({
         instructions: systemInstructions,
         model: "gpt-realtime",
-        voice: "marin"
+        voice: "cedar",
       });
 
       if (!session.ok || !session.clientSecret) {
-        setStatus("فشل الاتصال");
-        pushLog(session.error || "فشل إنشاء الجلسة.");
+        setStatus("فشل إنشاء الجلسة.");
+        pushLog(session.error || "فشل غير معروف أثناء إنشاء الجلسة.");
         setIsConnecting(false);
         return;
       }
 
-      pushLog("تم إنشاء الجلسة المؤقتة.");
-      setStatus("جاري طلب إذن الميكروفون...");
+      pushLog("تم إنشاء جلسة Realtime بنجاح.");
+      setStatus("جاري تفعيل الميكروفون...");
 
       const pc = new RTCPeerConnection();
       peerRef.current = pc;
 
-      const audioEl = new Audio();
-      audioEl.autoplay = true;
-      remoteAudioRef.current = audioEl;
+      const remoteAudio = new Audio();
+      remoteAudio.autoplay = true;
+      remoteAudioRef.current = remoteAudio;
 
       pc.ontrack = (event) => {
-        audioEl.srcObject = event.streams[0];
+        remoteAudio.srcObject = event.streams[0];
       };
 
       const stream = await navigator.mediaDevices.getUserMedia({
-  audio: {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: true,
-    channelCount: 1
-  }
-});
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
 
       localStreamRef.current = stream;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -136,9 +214,9 @@ export default function App() {
       dataChannelRef.current = dc;
 
       dc.onopen = () => {
-        pushLog("تم فتح قناة الأحداث.");
-        setStatus("متصل وجاهز");
+        pushLog("تم فتح قناة البيانات.");
         setConnected(true);
+        setStatus("متصل وجاهز للمحادثة الصوتية.");
 
         dc.send(
           JSON.stringify({
@@ -151,24 +229,32 @@ export default function App() {
                   turn_detection: {
                     type: "server_vad",
                     create_response: true,
-                    interrupt_response: true
-                  }
+                    interrupt_response: true,
+                  },
                 },
                 output: {
-                  voice: "marin",
-                  speed: 0.92
-                }
-              }
-            }
+                  voice: "cedar",
+                  speed: 0.92,
+                },
+              },
+            },
           })
         );
 
-        if (role === "client") {
-          sendTextMessage("مرحباً، أنا عميل لدى G E N E X وأحتاج المساعدة.");
-        } else if (role === "employee") {
-          sendTextMessage("مرحباً، أنا موظف لدى G E N E X.");
-        } else if (role === "investor") {
-          sendTextMessage("مرحباً، أنا مستثمر مهتم بـ G E N E X.");
+        if (activeRole === "client") {
+          sendTextMessage(
+            "ابدأ الحديث الآن بشكل مباشر. رحب بي كعميل لدى جينكس واسألني كيف تستطيع مساعدتي."
+          );
+        } else if (activeRole === "employee") {
+          sendTextMessage(
+            `ابدأ الحديث الآن بشكل مباشر. أنا موظف لدى جينكس ورقمي الوظيفي هو ${employeeId}.`
+          );
+        } else if (activeRole === "investor") {
+          sendTextMessage(
+            "ابدأ الحديث الآن بشكل مباشر. رحب بي كمستثمر مهتم بجينكس وابدأ بأسلوب تنفيذي احترافي."
+          );
+        } else {
+          sendTextMessage("ابدأ الحديث الآن واسألني هل أنا عميل أم موظف أم مستثمر.");
         }
       };
 
@@ -177,22 +263,26 @@ export default function App() {
           const msg = JSON.parse(event.data);
 
           if (msg.type === "response.text.done" && msg.text) {
-            setMessages((prev) => [...prev, `GENEX: ${msg.text}`]);
+            const text = String(msg.text);
+            setMessages((prev) => [...prev, `GENEX: ${text}`]);
 
-            const normalized = String(msg.text).toLowerCase();
+            const normalized = text.toLowerCase();
             const founderTriggers = [
               "عبدالله عياش",
               "abdullah ayash",
               "المؤسس",
-              "founder and ceo"
+              "founder and ceo",
             ];
 
-            if (founderTriggers.some((t) => normalized.includes(t))) {
+            if (founderTriggers.some((trigger) => normalized.includes(trigger))) {
               await window.genexDesktop?.showFounder(FOUNDER_IMAGE_URL);
             }
           }
 
-          if (msg.type === "conversation.item.input_audio_transcription.completed" && msg.transcript) {
+          if (
+            msg.type === "conversation.item.input_audio_transcription.completed" &&
+            msg.transcript
+          ) {
             setMessages((prev) => [...prev, `أنت: ${msg.transcript}`]);
           }
 
@@ -200,120 +290,99 @@ export default function App() {
             pushLog(`خطأ من الجلسة: ${msg.error?.message || "Unknown error"}`);
           }
         } catch {
-          // تجاهل أي رسائل غير JSON
+          // تجاهل الرسائل غير القابلة للتحليل
         }
       };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      const baseUrl = "https://api.openai.com/v1/realtime";
-      const sdpResponse = await fetch(`${baseUrl}?model=${session.model || "gpt-realtime"}`, {
+      const realtimeUrl = `https://api.openai.com/v1/realtime?model=${session.model || "gpt-realtime"}`;
+
+      const sdpResponse = await fetch(realtimeUrl, {
         method: "POST",
         body: offer.sdp,
         headers: {
           Authorization: `Bearer ${session.clientSecret}`,
-          "Content-Type": "application/sdp"
-        }
+          "Content-Type": "application/sdp",
+        },
       });
 
       const answerSdp = await sdpResponse.text();
 
+      if (!sdpResponse.ok) {
+        throw new Error(answerSdp || "Failed to negotiate WebRTC session");
+      }
+
       await pc.setRemoteDescription({
         type: "answer",
-        sdp: answerSdp
+        sdp: answerSdp,
       });
 
       pushLog("تم ربط WebRTC بنجاح.");
-      setStatus("متصل وجاهز");
+      setStatus("متصل وجاهز للمحادثة.");
     } catch (error: any) {
-      setStatus("فشل الاتصال");
-      pushLog(error?.message || "Unknown error");
+      setStatus("فشل الاتصال الصوتي.");
+      pushLog(error?.message || "فشل غير معروف أثناء الاتصال.");
+      disconnectVoice();
     } finally {
       setIsConnecting(false);
     }
   };
 
-  const disconnectVoice = () => {
-    dataChannelRef.current?.close();
-    dataChannelRef.current = null;
-
-    peerRef.current?.getSenders().forEach((sender) => {
-      sender.track?.stop();
-    });
-    peerRef.current?.close();
-    peerRef.current = null;
-
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
-    localStreamRef.current = null;
-
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.pause();
-      remoteAudioRef.current.srcObject = null;
-      remoteAudioRef.current = null;
-    }
-
-    setConnected(false);
-    setStatus("تم قطع الاتصال");
-    pushLog("تم قطع الجلسة.");
-  };
-
-  const sendTextMessage = (text: string) => {
-    const dc = dataChannelRef.current;
-    if (!dc || dc.readyState !== "open") return;
-
-    dc.send(
-      JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text
-            }
-          ]
-        }
-      })
-    );
-
-    dc.send(
-  JSON.stringify({
-    type: "response.create",
-    response: {
-      modalities: ["audio", "text"]
-    }
-  })
-);
-
   useEffect(() => {
-  const autoStart = async () => {
-    // نحدد المستخدم كعميل افتراضي
+    if (hasAutoStarted) return;
+
+    setHasAutoStarted(true);
     setRole("client");
+    setStatus("جاري تشغيل G E N E X تلقائيًا...");
 
-    // تأخير بسيط عشان الواجهة تجهز
-    setTimeout(() => {
-      connectVoice();
+    const timer = setTimeout(() => {
+      connectVoice("client");
     }, 1200);
-  };
 
-  autoStart();
-
-  return () => {
-    disconnectVoice();
-  };
-}, []);
+    return () => {
+      clearTimeout(timer);
+      disconnectVoice();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAutoStarted]);
 
   const buttonStyle: React.CSSProperties = {
-    background: "#111827",
+    background: "linear-gradient(180deg, rgba(17,24,39,1) 0%, rgba(9,14,26,1) 100%)",
     color: "white",
-    border: "1px solid #334155",
-    borderRadius: "14px",
-    padding: "14px 20px",
+    border: "1px solid rgba(120, 229, 255, 0.18)",
+    borderRadius: "16px",
+    padding: "14px 22px",
     fontSize: "16px",
     cursor: "pointer",
-    minWidth: "170px"
+    minWidth: "180px",
+    boxShadow: "0 0 18px rgba(0,229,255,0.08)",
+  };
+
+  const entityStyle: React.CSSProperties = {
+    width: "230px",
+    height: "230px",
+    borderRadius: "50%",
+    margin: "0 auto 24px auto",
+    background:
+      "radial-gradient(circle at 30% 30%, rgba(0,229,255,0.95), rgba(124,58,237,0.60) 42%, rgba(5,8,22,0.12) 75%)",
+    boxShadow:
+      "0 0 35px rgba(0,229,255,0.28), 0 0 90px rgba(124,58,237,0.20), inset 0 0 35px rgba(255,255,255,0.08)",
+    animation: "genexPulse 3.2s ease-in-out infinite",
+    position: "relative",
+    overflow: "hidden",
+  };
+
+  const entityInnerWave: React.CSSProperties = {
+    position: "absolute",
+    inset: "18%",
+    borderRadius: "50%",
+    background:
+      "conic-gradient(from 0deg, rgba(0,229,255,0.75), rgba(124,58,237,0.75), rgba(0,229,255,0.75))",
+    filter: "blur(12px)",
+    animation: "genexSpin 7s linear infinite",
+    opacity: 0.95,
   };
 
   return (
@@ -321,71 +390,100 @@ export default function App() {
       style={{
         minHeight: "100vh",
         background:
-          "radial-gradient(circle at top, rgba(80,0,140,0.35), transparent 35%), #050816",
+          "radial-gradient(circle at top, rgba(93, 32, 255, 0.18), transparent 24%), radial-gradient(circle at bottom, rgba(0, 229, 255, 0.10), transparent 20%), #050816",
         color: "white",
         padding: "24px",
-        fontFamily: "Arial, sans-serif"
+        fontFamily: "Arial, sans-serif",
       }}
     >
+      <style>{`
+        @keyframes genexPulse {
+          0% { transform: scale(1); opacity: 0.78; }
+          50% { transform: scale(1.06); opacity: 1; }
+          100% { transform: scale(1); opacity: 0.78; }
+        }
+
+        @keyframes genexSpin {
+          0% { transform: rotate(0deg) scale(1); }
+          50% { transform: rotate(180deg) scale(1.04); }
+          100% { transform: rotate(360deg) scale(1); }
+        }
+      `}</style>
+
       <div
         style={{
-          maxWidth: "1100px",
+          maxWidth: "1180px",
           margin: "0 auto",
           display: "grid",
           gridTemplateColumns: "1.2fr 0.8fr",
-          gap: "20px"
+          gap: "20px",
         }}
       >
         <div
           style={{
             background: "rgba(255,255,255,0.04)",
             border: "1px solid rgba(255,255,255,0.10)",
-            borderRadius: "24px",
-            padding: "28px",
-            boxShadow: "0 0 40px rgba(133, 76, 255, 0.15)"
+            borderRadius: "28px",
+            padding: "30px",
+            boxShadow: "0 0 40px rgba(133, 76, 255, 0.15)",
           }}
         >
           <h1
             style={{
               fontSize: "42px",
-              marginBottom: "12px",
+              marginBottom: "8px",
               letterSpacing: "0.35em",
               whiteSpace: "nowrap",
-              textAlign: "center"
+              textAlign: "center",
             }}
           >
             G E N E X
           </h1>
 
-          <p style={{ textAlign: "center", fontSize: "20px", marginBottom: "24px" }}>
+          <p
+            style={{
+              textAlign: "center",
+              fontSize: "20px",
+              marginBottom: "24px",
+              opacity: 0.95,
+            }}
+          >
             G E N E X AI Voice Core
           </p>
 
-          {!role && (
-            <>
-              <p style={{ textAlign: "center", marginBottom: "18px" }}>
-                اختر نوع المستخدم للبدء
-              </p>
+          <div style={entityStyle}>
+            <div style={entityInnerWave} />
+          </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  gap: "12px",
-                  justifyContent: "center",
-                  flexWrap: "wrap",
-                  marginBottom: "20px"
-                }}
-              >
-                <button onClick={() => setRole("client")} style={buttonStyle}>عميل</button>
-                <button onClick={() => setRole("employee")} style={buttonStyle}>موظف</button>
-                <button onClick={() => setRole("investor")} style={buttonStyle}>مستثمر</button>
-              </div>
-            </>
-          )}
+          <p style={{ textAlign: "center", marginBottom: "18px", fontSize: "18px" }}>
+            الحالة الحالية: {status}
+          </p>
+
+          <div
+            style={{
+              display: "flex",
+              gap: "12px",
+              justifyContent: "center",
+              flexWrap: "wrap",
+              marginBottom: "22px",
+            }}
+          >
+            <button style={buttonStyle} onClick={() => setRole("client")}>
+              عميل
+            </button>
+            <button style={buttonStyle} onClick={() => setRole("employee")}>
+              موظف
+            </button>
+            <button style={buttonStyle} onClick={() => setRole("investor")}>
+              مستثمر
+            </button>
+          </div>
 
           {role === "employee" && (
-            <div style={{ marginBottom: "18px" }}>
-              <label style={{ display: "block", marginBottom: "8px" }}>الرقم الوظيفي</label>
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{ display: "block", marginBottom: "8px" }}>
+                الرقم الوظيفي
+              </label>
               <input
                 value={employeeId}
                 onChange={(e) => setEmployeeId(e.target.value)}
@@ -394,43 +492,35 @@ export default function App() {
                   width: "100%",
                   padding: "12px",
                   borderRadius: "12px",
-                  border: "1px solid #334155",
+                  border: "1px solid rgba(255,255,255,0.12)",
                   background: "#0f172a",
-                  color: "white"
+                  color: "white",
                 }}
               />
             </div>
           )}
 
-          {role && (
-            <div
-              style={{
-                display: "flex",
-                gap: "12px",
-                flexWrap: "wrap",
-                justifyContent: "center",
-                marginBottom: "18px"
-              }}
+          <div
+            style={{
+              display: "flex",
+              gap: "12px",
+              justifyContent: "center",
+              flexWrap: "wrap",
+              marginBottom: "22px",
+            }}
+          >
+            <button
+              style={buttonStyle}
+              disabled={isConnecting || (role === "employee" && !employeeId.trim())}
+              onClick={() => connectVoice()}
             >
-              {!connected ? (
-                <button
-                  style={buttonStyle}
-                  disabled={isConnecting || (role === "employee" && !employeeId.trim())}
-                  onClick={connectVoice}
-                >
-                  {isConnecting ? "جاري الاتصال..." : "بدء المحادثة الصوتية"}
-                </button>
-              ) : (
-                <button style={buttonStyle} onClick={disconnectVoice}>
-                  إنهاء الاتصال
-                </button>
-              )}
+              {isConnecting ? "جاري الاتصال..." : "بدء / إعادة بدء المحادثة الصوتية"}
+            </button>
 
-              <button style={buttonStyle} onClick={() => setRole(null)}>
-                تغيير الدور
-              </button>
-            </div>
-          )}
+            <button style={buttonStyle} onClick={disconnectVoice}>
+              إنهاء الاتصال
+            </button>
+          </div>
 
           <div
             style={{
@@ -438,14 +528,14 @@ export default function App() {
               borderRadius: "18px",
               padding: "16px",
               minHeight: "260px",
-              border: "1px solid rgba(255,255,255,0.08)"
+              border: "1px solid rgba(255,255,255,0.08)",
             }}
           >
             <div style={{ marginBottom: "10px", fontWeight: 700 }}>المحادثة</div>
 
             {messages.length === 0 ? (
               <div style={{ opacity: 0.75 }}>
-                بعد الاتصال، تكلم مباشرة وسيرد G E N E X صوتيًا.
+                سيفتح G E N E X المحادثة تلقائيًا. وإذا احتجت، اضغط زر بدء المحادثة الصوتية.
               </div>
             ) : (
               messages.map((m, i) => (
@@ -461,49 +551,50 @@ export default function App() {
           style={{
             background: "rgba(255,255,255,0.04)",
             border: "1px solid rgba(255,255,255,0.10)",
-            borderRadius: "24px",
+            borderRadius: "28px",
             padding: "24px",
-            boxShadow: "0 0 40px rgba(133, 76, 255, 0.15)"
+            boxShadow: "0 0 40px rgba(133, 76, 255, 0.15)",
           }}
         >
-          <div style={{ fontSize: "20px", marginBottom: "12px" }}>الحالة</div>
-          <div
-            style={{
-              background: "#0b1220",
-              borderRadius: "14px",
-              padding: "14px",
-              marginBottom: "14px",
-              border: "1px solid rgba(255,255,255,0.08)"
-            }}
-          >
-            {status}
-          </div>
+          <div style={{ fontSize: "20px", marginBottom: "12px" }}>سجل النظام</div>
 
-          <div style={{ fontSize: "20px", marginBottom: "12px" }}>السجل</div>
           <div
             style={{
               background: "#0b1220",
               borderRadius: "14px",
               padding: "14px",
-              minHeight: "340px",
-              border: "1px solid rgba(255,255,255,0.08)"
+              minHeight: "360px",
+              border: "1px solid rgba(255,255,255,0.08)",
+              marginBottom: "16px",
             }}
           >
             {logs.length === 0 ? (
               <div style={{ opacity: 0.75 }}>لا توجد أحداث بعد.</div>
             ) : (
               logs.map((log, i) => (
-                <div key={i} style={{ marginBottom: "10px", fontSize: "14px", lineHeight: 1.6 }}>
+                <div
+                  key={i}
+                  style={{
+                    marginBottom: "10px",
+                    fontSize: "14px",
+                    lineHeight: 1.6,
+                    opacity: 0.95,
+                  }}
+                >
                   {log}
                 </div>
               ))
             )}
           </div>
 
-          <div style={{ marginTop: "16px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
             <button
               style={buttonStyle}
-              onClick={() => window.genexDesktop?.openUrl("https://genex-2050era.github.io/genex-website/")}
+              onClick={() =>
+                window.genexDesktop?.openUrl(
+                  "https://genex-2050era.github.io/genex-website/"
+                )
+              }
             >
               فتح موقع G E N E X
             </button>
